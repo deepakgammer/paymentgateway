@@ -36,7 +36,7 @@ const AUTH_URL =
 
 const PAYMENT_URL =
   MODE === "production"
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
+    ? "https://api.phonepe.com/apis/pg/checkout/v2/pay"
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay";
 
 // ============================================================
@@ -68,7 +68,6 @@ async function getAuthToken() {
     throw new Error("Invalid JSON response from PhonePe Auth");
   }
 
-  // ✅ Handle all formats (Sandbox + Production)
   const token =
     data?.access_token ||
     data?.data?.access_token ||
@@ -85,7 +84,7 @@ async function getAuthToken() {
 
   return {
     token,
-    type: data.token_type || "Bearer",
+    type: data.token_type || "O-Bearer",
   };
 }
 
@@ -96,7 +95,9 @@ app.post("/create-payment", async (req, res) => {
   try {
     const { amount, orderId } = req.body;
     if (!amount || !orderId) {
-      return res.status(400).json({ success: false, message: "Missing amount or orderId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing amount or orderId" });
     }
 
     // 🔐 Get Access Token
@@ -119,7 +120,6 @@ app.post("/create-payment", async (req, res) => {
     console.log("\n🧾 Payment Payload:");
     console.log(JSON.stringify(payload, null, 2));
 
-    // 🔗 Create payment
     const response = await fetch(PAYMENT_URL, {
       method: "POST",
       headers: {
@@ -162,7 +162,7 @@ app.post("/create-payment", async (req, res) => {
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
-  // TODO: Verify checksum when SALT_KEY + SALT_INDEX are available
+  // TODO: Add checksum verification once PhonePe provides SALT_KEY + SALT_INDEX
   res.status(200).send("Webhook acknowledged");
 });
 
