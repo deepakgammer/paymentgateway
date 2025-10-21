@@ -70,25 +70,30 @@ async function getAuthToken() {
 }
 
 // ============================================================
-// ✅ CREATE PAYMENT REQUEST (PG CHECKOUT)
+// ✅ CREATE PAYMENT REQUEST (PG CHECKOUT - DYNAMIC)
 // ============================================================
-app.get("/pay", async (req, res) => {
+// Frontend will call POST /create-payment with { amount, orderId }
+app.post("/create-payment", async (req, res) => {
   try {
+    const { amount, orderId } = req.body;
+
+    if (!amount || !orderId) {
+      return res.status(400).json({ error: "Missing amount or orderId" });
+    }
+
     const token = await getAuthToken();
-    const ts = Date.now();
-    const merchantOrderId = `ORDER${ts}`;
-    const amount = 1000; // ₹10 in paise
+    const amountPaise = Math.round(amount * 100); // Convert ₹ → paise
 
     const payload = {
-      merchantOrderId,
-      amount,
+      merchantOrderId: orderId,
+      amount: amountPaise,
       expireAfter: 1200,
-      metaInfo: { udf1: "perlyn_render_test" },
+      metaInfo: { udf1: "perlyn_live_order" },
       paymentFlow: {
         type: "PG_CHECKOUT",
-        message: "PhonePe PG Render Test",
+        message: "PhonePe PG Live Payment",
         merchantUrls: {
-          redirectUrl: `https://www.perlynbeauty.co/success/${merchantOrderId}`,
+          redirectUrl: `https://www.perlynbeauty.co/success/${orderId}`,
         },
       },
     };
@@ -116,30 +121,20 @@ app.get("/pay", async (req, res) => {
     }
 
     const mercuryUrl =
-      data?.redirectUrl || data?.data?.redirectUrl || data?.response?.redirectUrl;
+      data?.redirectUrl ||
+      data?.data?.redirectUrl ||
+      data?.response?.redirectUrl;
 
     if (mercuryUrl && mercuryUrl.includes("mercury")) {
       console.log("✅ Mercury URL:", mercuryUrl);
-      res.send(`
-        <html>
-          <body style="font-family:sans-serif;text-align:center;background:#f3e4db;color:#4b3b32;">
-            <h2>✅ Mercury Sandbox Ready</h2>
-            <p>Click below to open the checkout page:</p>
-            <a href="${mercuryUrl}" target="_blank"
-              style="background:#b98474;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;">
-              Open Payment Page
-            </a>
-            <br><br><small>${mercuryUrl}</small>
-          </body>
-        </html>
-      `);
+      return res.json({ success: true, redirectUrl: mercuryUrl });
     } else {
       console.warn("⚠️ No Mercury redirect URL found:", data);
-      res.status(400).json(data);
+      return res.status(400).json({ success: false, data });
     }
   } catch (err) {
     console.error("❌ Error:", err.message);
-    res.status(500).send(`<pre>${err.message}</pre>`);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -148,12 +143,12 @@ app.get("/pay", async (req, res) => {
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
-  // TODO: Verify checksum when SALT_KEY + SALT_INDEX are available
+  // TODO: verify checksum when SALT_KEY + SALT_INDEX available
   res.status(200).send("Webhook acknowledged");
 });
 
 // ============================================================
-// ✅ SUCCESS PAGE
+// ✅ SUCCESS PAGE (Fallback)
 // ============================================================
 app.get("/success/:id", (req, res) => {
   res.send(`
@@ -161,7 +156,7 @@ app.get("/success/:id", (req, res) => {
       <body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
         <h2>🎉 Payment Complete!</h2>
         <p>Order ID: ${req.params.id}</p>
-        <a href="/pay">Start New Payment</a>
+        <a href="/">Return to Perlyn</a>
       </body>
     </html>
   `);
