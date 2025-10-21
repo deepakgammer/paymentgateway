@@ -1,5 +1,5 @@
 // ============================================================
-// ✅ PHONEPE V2 — FINAL DEPLOYMENT WITH SUCCESS + FAILURE HANDLING
+// ✅ PHONEPE V2 — PRODUCTION READY (PERLYN LIVE BUILD)
 // ============================================================
 
 import express from "express";
@@ -15,7 +15,7 @@ app.use(express.json());
 app.use(express.static("public"));
 
 // ============================================================
-// 🔧 ENVIRONMENT VARIABLES
+// 🔧 ENV VARIABLES
 // ============================================================
 const {
   MODE,
@@ -41,7 +41,7 @@ const PAYMENT_URL =
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay";
 
 // ============================================================
-// ✅ AUTH TOKEN GENERATOR
+// ✅ AUTH TOKEN
 // ============================================================
 async function getAuthToken() {
   console.log(`\n🔐 Requesting Auth Token from: ${AUTH_URL}`);
@@ -60,41 +60,32 @@ async function getAuthToken() {
   });
 
   const data = await res.json();
-  if (!res.ok) {
-    console.error("❌ Auth API Response:", data);
-    throw new Error(data.error_description || "Auth failed");
-  }
-
+  if (!res.ok) throw new Error(data.error_description || "Auth failed");
   console.log("✅ Auth Token fetched successfully");
   return data.access_token;
 }
 
 // ============================================================
-// ✅ CREATE PAYMENT REQUEST (PG CHECKOUT)
+// ✅ CREATE PAYMENT — Used by /create-payment
 // ============================================================
-app.get("/pay", async (req, res) => {
+app.post("/create-payment", async (req, res) => {
   try {
+    const { amount, orderId } = req.body;
     const token = await getAuthToken();
-    const ts = Date.now();
-    const merchantOrderId = `ORDER${ts}`;
-    const amount = 49900; // Example ₹499.00 (amount in paise)
 
     const payload = {
-      merchantOrderId,
-      amount,
+      merchantOrderId: orderId,
+      amount: amount * 100, // Convert ₹ → paise
       expireAfter: 1200,
-      metaInfo: { udf1: "perlyn_render_test" },
+      metaInfo: { udf1: "perlyn_live_payment" },
       paymentFlow: {
         type: "PG_CHECKOUT",
-        message: "PhonePe PG Render Test",
+        message: "Perlyn Beauty Payment Gateway",
         merchantUrls: {
-          redirectUrl: `https://paymentgateway-uvsq.onrender.com/result/${merchantOrderId}`,
+          redirectUrl: `https://www.perlynbeauty.co/success/${orderId}`,
         },
       },
     };
-
-    console.log("\n🧾 Payload Sent:");
-    console.log(JSON.stringify(payload, null, 2));
 
     const response = await fetch(PAYMENT_URL, {
       method: "POST",
@@ -106,9 +97,7 @@ app.get("/pay", async (req, res) => {
     });
 
     const text = await response.text();
-    console.log("\n📥 Raw API Response:", text);
-
-    let data;
+    let data = {};
     try {
       data = JSON.parse(text);
     } catch {
@@ -118,83 +107,20 @@ app.get("/pay", async (req, res) => {
     const mercuryUrl =
       data?.redirectUrl || data?.data?.redirectUrl || data?.response?.redirectUrl;
 
-    if (mercuryUrl && mercuryUrl.includes("mercury")) {
+    if (mercuryUrl) {
       console.log("✅ Mercury URL:", mercuryUrl);
-      res.redirect(mercuryUrl);
+      res.json({ success: true, redirectUrl: mercuryUrl });
     } else {
-      console.warn("⚠️ No Mercury redirect URL found:", data);
-      res.status(400).json(data);
+      res.status(400).json({ success: false, error: "No redirect URL", data });
     }
   } catch (err) {
     console.error("❌ Error:", err.message);
-    res.status(500).send(`<pre>${err.message}</pre>`);
-  }
-});
-// ============================================================
-// ✅ CREATE PAYMENT API — Called from Perlyn frontend
-// ============================================================
-app.post("/create-payment", async (req, res) => {
-  try {
-    const token = await getAuthToken();
-    const ts = Date.now();
-    const merchantOrderId = `ORDER${ts}`;
-    const { amount } = req.body || { amount: 1000 };
-
-    const payload = {
-      merchantOrderId,
-      amount,
-      expireAfter: 1200,
-      metaInfo: { udf1: "perlyn_live_payment" },
-      paymentFlow: {
-        type: "PG_CHECKOUT",
-        message: "Perlyn Payment",
-        merchantUrls: {
-          redirectUrl: `https://www.perlynbeauty.co/success/${merchantOrderId}`,
-        },
-      },
-    };
-
-    const response = await fetch(PAYMENT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `O-Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-    console.log("📦 PhonePe Response:", data);
-
-    res.json({
-      orderId: merchantOrderId,
-      redirectUrl: data.redirectUrl || data.data?.redirectUrl,
-    });
-  } catch (err) {
-    console.error("❌ Payment creation failed:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
 // ============================================================
-// ✅ RESULT REDIRECTION HANDLER
-// ============================================================
-app.get("/result/:id", (req, res) => {
-  const orderId = req.params.id;
-
-  // For demo, we can decide success/failure based on sandbox response later.
-  // For now, always redirect to frontend.
-  const isSuccess = true;
-
-  if (isSuccess) {
-    res.redirect(`https://www.perlynbeauty.co/success.html?order=${orderId}`);
-  } else {
-    res.redirect(`https://www.perlynbeauty.co/fail.html?order=${orderId}`);
-  }
-});
-
-// ============================================================
-// ✅ WEBHOOK ENDPOINT
+// ✅ WEBHOOK — Payment Updates
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
@@ -202,10 +128,32 @@ app.post("/phonepe/webhook", (req, res) => {
 });
 
 // ============================================================
-// 🚀 START SERVER
+// ✅ SUCCESS / FAIL PAGES
 // ============================================================
-const port = PORT || process.env.PORT || 5000;
-app.listen(port, () => {
-  console.log(`🚀 PhonePe V2 Proto running live on Render (port ${port})`);
+app.get("/success/:id", (req, res) => {
+  res.send(`
+    <html><body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
+      <h2>🎉 Payment Complete!</h2>
+      <p>Order ID: ${req.params.id}</p>
+      <a href="https://www.perlynbeauty.co">Back to Home</a>
+    </body></html>
+  `);
 });
 
+app.get("/fail", (req, res) => {
+  res.send(`
+    <html><body style="background:#ffd1d1;text-align:center;font-family:sans-serif;">
+      <h2>❌ Payment Failed</h2>
+      <p>Please try again or use a different payment method.</p>
+      <a href="https://www.perlynbeauty.co">Return to Shop</a>
+    </body></html>
+  `);
+});
+
+// ============================================================
+// 🚀 START SERVER
+// ============================================================
+const port = PORT || 5000;
+app.listen(port, () => {
+  console.log(`🚀 PhonePe V2 Proto running in ${MODE} mode (port ${port})`);
+});
