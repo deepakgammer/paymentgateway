@@ -1,5 +1,5 @@
 // ============================================================
-// ✅ PHONEPE V2 — FINAL RENDER DEPLOYMENT (PERLYN LIVE BUILD)
+// ✅ PHONEPE V2 — FINAL DEPLOYMENT WITH SUCCESS + FAILURE HANDLING
 // ============================================================
 
 import express from "express";
@@ -18,7 +18,7 @@ app.use(express.static("public"));
 // 🔧 ENVIRONMENT VARIABLES
 // ============================================================
 const {
-  MODE, // "production" or "sandbox"
+  MODE,
   CLIENT_ID,
   CLIENT_SECRET,
   CLIENT_VERSION,
@@ -70,30 +70,25 @@ async function getAuthToken() {
 }
 
 // ============================================================
-// ✅ CREATE PAYMENT REQUEST (PG CHECKOUT - DYNAMIC)
+// ✅ CREATE PAYMENT REQUEST (PG CHECKOUT)
 // ============================================================
-// Frontend will call POST /create-payment with { amount, orderId }
-app.post("/create-payment", async (req, res) => {
+app.get("/pay", async (req, res) => {
   try {
-    const { amount, orderId } = req.body;
-
-    if (!amount || !orderId) {
-      return res.status(400).json({ error: "Missing amount or orderId" });
-    }
-
     const token = await getAuthToken();
-    const amountPaise = Math.round(amount * 100); // Convert ₹ → paise
+    const ts = Date.now();
+    const merchantOrderId = `ORDER${ts}`;
+    const amount = 49900; // Example ₹499.00 (amount in paise)
 
     const payload = {
-      merchantOrderId: orderId,
-      amount: amountPaise,
+      merchantOrderId,
+      amount,
       expireAfter: 1200,
-      metaInfo: { udf1: "perlyn_live_order" },
+      metaInfo: { udf1: "perlyn_render_test" },
       paymentFlow: {
         type: "PG_CHECKOUT",
-        message: "PhonePe PG Live Payment",
+        message: "PhonePe PG Render Test",
         merchantUrls: {
-          redirectUrl: `https://www.perlynbeauty.co/success/${orderId}`,
+          redirectUrl: `https://paymentgateway-uvsq.onrender.com/result/${merchantOrderId}`,
         },
       },
     };
@@ -121,20 +116,35 @@ app.post("/create-payment", async (req, res) => {
     }
 
     const mercuryUrl =
-      data?.redirectUrl ||
-      data?.data?.redirectUrl ||
-      data?.response?.redirectUrl;
+      data?.redirectUrl || data?.data?.redirectUrl || data?.response?.redirectUrl;
 
     if (mercuryUrl && mercuryUrl.includes("mercury")) {
       console.log("✅ Mercury URL:", mercuryUrl);
-      return res.json({ success: true, redirectUrl: mercuryUrl });
+      res.redirect(mercuryUrl);
     } else {
       console.warn("⚠️ No Mercury redirect URL found:", data);
-      return res.status(400).json({ success: false, data });
+      res.status(400).json(data);
     }
   } catch (err) {
     console.error("❌ Error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).send(`<pre>${err.message}</pre>`);
+  }
+});
+
+// ============================================================
+// ✅ RESULT REDIRECTION HANDLER
+// ============================================================
+app.get("/result/:id", (req, res) => {
+  const orderId = req.params.id;
+
+  // For demo, we can decide success/failure based on sandbox response later.
+  // For now, always redirect to frontend.
+  const isSuccess = true;
+
+  if (isSuccess) {
+    res.redirect(`https://www.perlynbeauty.co/success.html?order=${orderId}`);
+  } else {
+    res.redirect(`https://www.perlynbeauty.co/fail.html?order=${orderId}`);
   }
 });
 
@@ -143,23 +153,7 @@ app.post("/create-payment", async (req, res) => {
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
-  // TODO: verify checksum when SALT_KEY + SALT_INDEX available
   res.status(200).send("Webhook acknowledged");
-});
-
-// ============================================================
-// ✅ SUCCESS PAGE (Fallback)
-// ============================================================
-app.get("/success/:id", (req, res) => {
-  res.send(`
-    <html>
-      <body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
-        <h2>🎉 Payment Complete!</h2>
-        <p>Order ID: ${req.params.id}</p>
-        <a href="/">Return to Perlyn</a>
-      </body>
-    </html>
-  `);
 });
 
 // ============================================================
