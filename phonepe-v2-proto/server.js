@@ -1,5 +1,5 @@
 // ============================================================
-// ✅ PHONEPE V2 RENDER DEPLOYMENT (FINAL PERLYN BUILD)
+// ✅ PHONEPE V2 — FINAL RENDER DEPLOYMENT (PERLYN LIVE BUILD)
 // ============================================================
 
 import express from "express";
@@ -18,12 +18,12 @@ app.use(express.static("public"));
 // 🔧 ENVIRONMENT VARIABLES
 // ============================================================
 const {
-  MODE,             // "production" or "sandbox"
+  MODE, // "production" or "sandbox"
   CLIENT_ID,
   CLIENT_SECRET,
   CLIENT_VERSION,
   MERCHANT_ID,
-  PORT
+  PORT,
 } = process.env;
 
 // ============================================================
@@ -38,7 +38,7 @@ const AUTH_URL = `${BASE_URL}/oauth/token`;
 const PAYMENT_URL =
   MODE === "production"
     ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay`;
+    : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay";
 
 // ============================================================
 // ✅ AUTH TOKEN GENERATOR
@@ -50,13 +50,13 @@ async function getAuthToken() {
     client_id: CLIENT_ID,
     client_secret: CLIENT_SECRET,
     client_version: CLIENT_VERSION,
-    grant_type: "client_credentials"
+    grant_type: "client_credentials",
   });
 
   const res = await fetch(AUTH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params
+    body: params,
   });
 
   const data = await res.json();
@@ -70,7 +70,7 @@ async function getAuthToken() {
 }
 
 // ============================================================
-// ✅ CREATE PAYMENT REQUEST
+// ✅ CREATE PAYMENT REQUEST (PG CHECKOUT)
 // ============================================================
 app.get("/pay", async (req, res) => {
   try {
@@ -88,9 +88,9 @@ app.get("/pay", async (req, res) => {
         type: "PG_CHECKOUT",
         message: "PhonePe PG Render Test",
         merchantUrls: {
-          redirectUrl: `https://www.perlynbeauty.co/success/${merchantOrderId}`
-        }
-      }
+          redirectUrl: `https://www.perlynbeauty.co/success/${merchantOrderId}`,
+        },
+      },
     };
 
     console.log("\n🧾 Payload Sent:");
@@ -100,9 +100,9 @@ app.get("/pay", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `O-Bearer ${token}`
+        Authorization: `O-Bearer ${token}`,
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
 
     const text = await response.text();
@@ -148,7 +148,7 @@ app.get("/pay", async (req, res) => {
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
-  // TODO: verify checksum when SALT_KEY + SALT_INDEX available
+  // TODO: Verify checksum when SALT_KEY + SALT_INDEX are available
   res.status(200).send("Webhook acknowledged");
 });
 
@@ -157,11 +157,13 @@ app.post("/phonepe/webhook", (req, res) => {
 // ============================================================
 app.get("/success/:id", (req, res) => {
   res.send(`
-    <html><body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
-      <h2>🎉 Payment Complete!</h2>
-      <p>Order ID: ${req.params.id}</p>
-      <a href="/pay">Start New Payment</a>
-    </body></html>
+    <html>
+      <body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
+        <h2>🎉 Payment Complete!</h2>
+        <p>Order ID: ${req.params.id}</p>
+        <a href="/pay">Start New Payment</a>
+      </body>
+    </html>
   `);
 });
 
@@ -170,5 +172,5 @@ app.get("/success/:id", (req, res) => {
 // ============================================================
 const port = PORT || process.env.PORT || 5000;
 app.listen(port, () => {
-  console.log(`🚀 PhonePe Proto running on Render at port ${port}`);
+  console.log(`🚀 PhonePe V2 Proto running live on Render (port ${port})`);
 });
