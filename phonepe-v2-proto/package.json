@@ -1,14 +1,11 @@
 {
   "name": "phonepe-v2-proto",
   "version": "1.0.0",
-  "description": "PhonePe V2 Sandbox Payment Prototype",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
-  "author": "Deepak",
-  "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
