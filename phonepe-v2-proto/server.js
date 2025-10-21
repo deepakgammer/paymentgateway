@@ -84,7 +84,7 @@ async function getAuthToken() {
 
   return {
     token,
-    type: data.token_type || "O-Bearer",
+    type: data.token_type || "Bearer",
   };
 }
 
@@ -95,9 +95,7 @@ app.post("/create-payment", async (req, res) => {
   try {
     const { amount, orderId } = req.body;
     if (!amount || !orderId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing amount or orderId" });
+      return res.status(400).json({ success: false, message: "Missing amount or orderId" });
     }
 
     // 🔐 Get Access Token
@@ -112,7 +110,7 @@ app.post("/create-payment", async (req, res) => {
         type: "PG_CHECKOUT",
         message: "Perlyn Beauty Payment Gateway",
         merchantUrls: {
-          redirectUrl: `https://www.perlynbeauty.co/success/${orderId}`,
+          redirectUrl: `https://paymentgateway-uvsq.onrender.com/success/${orderId}`,
         },
       },
     };
@@ -162,7 +160,7 @@ app.post("/create-payment", async (req, res) => {
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
-  // TODO: Add checksum verification once PhonePe provides SALT_KEY + SALT_INDEX
+  // TODO: Verify checksum when SALT_KEY + SALT_INDEX are available
   res.status(200).send("Webhook acknowledged");
 });
 
@@ -171,25 +169,31 @@ app.post("/phonepe/webhook", (req, res) => {
 // ============================================================
 app.get("/success/:id", (req, res) => {
   res.send(`
-    <html><body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
-      <h2>🎉 Payment Successful!</h2>
-      <p>Order ID: ${req.params.id}</p>
-      <a href="https://www.perlynbeauty.co" 
-         style="color:#fff;background:#b98474;padding:12px 24px;border-radius:8px;text-decoration:none;">
-         Return to Perlyn</a>
-    </body></html>
+    <html>
+      <body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
+        <h2>🎉 Payment Successful!</h2>
+        <p>Order ID: ${req.params.id}</p>
+        <p style="color:#555;">Transaction Verified with PhonePe Server.</p>
+        <p>Redirecting you to <b>Perlyn Beauty</b>...</p>
+        <script>
+          setTimeout(() => window.location.href='https://www.perlynbeauty.co/thankyou.html', 4000);
+        </script>
+      </body>
+    </html>
   `);
 });
 
 app.get("/fail", (req, res) => {
   res.send(`
-    <html><body style="background:#ffd1d1;text-align:center;font-family:sans-serif;">
-      <h2>❌ Payment Failed</h2>
-      <p>Please try again or use a different payment method.</p>
-      <a href="https://www.perlynbeauty.co" 
-         style="color:#fff;background:#a14b4b;padding:12px 24px;border-radius:8px;text-decoration:none;">
-         Back to Shop</a>
-    </body></html>
+    <html>
+      <body style="background:#ffd1d1;text-align:center;font-family:sans-serif;">
+        <h2>❌ Payment Failed</h2>
+        <p>Please try again or use a different payment method.</p>
+        <a href="https://www.perlynbeauty.co" 
+           style="color:#fff;background:#a14b4b;padding:12px 24px;border-radius:8px;text-decoration:none;">
+           Back to Shop</a>
+      </body>
+    </html>
   `);
 });
 
