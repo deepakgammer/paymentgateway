@@ -1,5 +1,5 @@
 // ============================================================
-// ✅ PHONEPE V2 — PRODUCTION READY (PERLYN LIVE BUILD)
+// ✅ PHONEPE V2 — FINAL PRODUCTION DEPLOYMENT (PERLYN LIVE BUILD)
 // ============================================================
 
 import express from "express";
@@ -18,7 +18,7 @@ app.use(express.static("public"));
 // 🔧 ENV VARIABLES
 // ============================================================
 const {
-  MODE,
+  MODE, // "production" or "sandbox"
   CLIENT_ID,
   CLIENT_SECRET,
   CLIENT_VERSION,
@@ -27,21 +27,20 @@ const {
 } = process.env;
 
 // ============================================================
-// 🔗 BASE URLS
+// 🔗 API ENDPOINTS (per environment)
 // ============================================================
-const BASE_URL =
+const AUTH_URL =
   MODE === "production"
-    ? "https://api.phonepe.com/apis/hermes/pg/v1"
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/v1";
+    ? "https://api.phonepe.com/apis/identity-manager/v1/oauth/token"
+    : "https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token";
 
-const AUTH_URL = `${BASE_URL}/oauth/token`;
 const PAYMENT_URL =
   MODE === "production"
     ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
     : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay";
 
 // ============================================================
-// ✅ AUTH TOKEN
+// ✅ FETCH AUTH TOKEN
 // ============================================================
 async function getAuthToken() {
   console.log(`\n🔐 Requesting Auth Token from: ${AUTH_URL}`);
@@ -59,23 +58,39 @@ async function getAuthToken() {
     body: params,
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error_description || "Auth failed");
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    console.error("❌ Invalid JSON response from PhonePe:", text);
+    throw new Error("Invalid JSON response");
+  }
+
+  if (!res.ok || !data.data?.access_token) {
+    console.error("❌ Auth Response:", data);
+    throw new Error(data.message || "Auth failed");
+  }
+
   console.log("✅ Auth Token fetched successfully");
-  return data.access_token;
+  return data.data.access_token;
 }
 
 // ============================================================
-// ✅ CREATE PAYMENT — Used by /create-payment
+// ✅ CREATE PAYMENT ENDPOINT
 // ============================================================
 app.post("/create-payment", async (req, res) => {
   try {
     const { amount, orderId } = req.body;
-    const token = await getAuthToken();
+    if (!amount || !orderId)
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing amount or orderId" });
 
+    const token = await getAuthToken();
     const payload = {
       merchantOrderId: orderId,
-      amount: amount * 100, // Convert ₹ → paise
+      amount: amount * 100, // ₹ → paise
       expireAfter: 1200,
       metaInfo: { udf1: "perlyn_live_payment" },
       paymentFlow: {
@@ -87,6 +102,9 @@ app.post("/create-payment", async (req, res) => {
       },
     };
 
+    console.log("\n🧾 Payload Sent:");
+    console.log(JSON.stringify(payload, null, 2));
+
     const response = await fetch(PAYMENT_URL, {
       method: "POST",
       headers: {
@@ -97,22 +115,25 @@ app.post("/create-payment", async (req, res) => {
     });
 
     const text = await response.text();
+    console.log("\n📥 Raw API Response:", text);
+
     let data = {};
     try {
       data = JSON.parse(text);
     } catch {
-      throw new Error("Invalid JSON response");
+      throw new Error("Invalid JSON response from payment API");
     }
 
-    const mercuryUrl =
+    const redirectUrl =
       data?.redirectUrl || data?.data?.redirectUrl || data?.response?.redirectUrl;
 
-    if (mercuryUrl) {
-      console.log("✅ Mercury URL:", mercuryUrl);
-      res.json({ success: true, redirectUrl: mercuryUrl });
-    } else {
-      res.status(400).json({ success: false, error: "No redirect URL", data });
+    if (redirectUrl && redirectUrl.includes("phonepe.com")) {
+      console.log("✅ Redirecting user to:", redirectUrl);
+      return res.json({ success: true, redirectUrl });
     }
+
+    console.warn("⚠️ No redirect URL found:", data);
+    res.status(400).json({ success: false, data });
   } catch (err) {
     console.error("❌ Error:", err.message);
     res.status(500).json({ success: false, message: err.message });
@@ -120,33 +141,44 @@ app.post("/create-payment", async (req, res) => {
 });
 
 // ============================================================
-// ✅ WEBHOOK — Payment Updates
+// ✅ WEBHOOK (optional verification)
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
+  // You can verify signature here when SALT_KEY + SALT_INDEX are provided
   res.status(200).send("Webhook acknowledged");
 });
 
 // ============================================================
-// ✅ SUCCESS / FAIL PAGES
+// ✅ SUCCESS + FAILURE HANDLERS
 // ============================================================
 app.get("/success/:id", (req, res) => {
   res.send(`
-    <html><body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
-      <h2>🎉 Payment Complete!</h2>
-      <p>Order ID: ${req.params.id}</p>
-      <a href="https://www.perlynbeauty.co">Back to Home</a>
-    </body></html>
+    <html>
+      <body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
+        <h2>🎉 Payment Complete!</h2>
+        <p>Order ID: ${req.params.id}</p>
+        <a href="https://www.perlynbeauty.co" 
+           style="display:inline-block;margin-top:10px;padding:10px 20px;background:#b98474;color:white;text-decoration:none;border-radius:6px;">
+           Back to Home
+        </a>
+      </body>
+    </html>
   `);
 });
 
 app.get("/fail", (req, res) => {
   res.send(`
-    <html><body style="background:#ffd1d1;text-align:center;font-family:sans-serif;">
-      <h2>❌ Payment Failed</h2>
-      <p>Please try again or use a different payment method.</p>
-      <a href="https://www.perlynbeauty.co">Return to Shop</a>
-    </body></html>
+    <html>
+      <body style="background:#ffd1d1;text-align:center;font-family:sans-serif;">
+        <h2>❌ Payment Failed</h2>
+        <p>Please try again or use another payment method.</p>
+        <a href="https://www.perlynbeauty.co"
+           style="display:inline-block;margin-top:10px;padding:10px 20px;background:#b98474;color:white;text-decoration:none;border-radius:6px;">
+           Return to Shop
+        </a>
+      </body>
+    </html>
   `);
 });
 
@@ -155,5 +187,5 @@ app.get("/fail", (req, res) => {
 // ============================================================
 const port = PORT || 5000;
 app.listen(port, () => {
-  console.log(`🚀 PhonePe V2 Proto running in ${MODE} mode (port ${port})`);
+  console.log(`🚀 PhonePe V2 running in ${MODE} mode on port ${port}`);
 });
