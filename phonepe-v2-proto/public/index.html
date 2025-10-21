@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PhonePe V2 Proto</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f3e4db;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+      }
+      h1 {
+        color: #b98474;
+      }
+      button {
+        padding: 10px 20px;
+        border: none;
+        background: #b98474;
+        color: white;
+        border-radius: 8px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #8a6657;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>PhonePe V2 Sandbox Prototype</h1>
+    <button onclick="startPayment()">Start Payment</button>
+
+    <script>
+      async function startPayment() {
+        const res = await fetch("/pay");
+        const text = await res.text();
+        document.body.innerHTML = text;
+      }
+    </script>
+  </body>
+</html>
