@@ -1,5 +1,5 @@
 // ============================================================
-// ✅ PHONEPE V2 PRODUCTION - WORKING LIVE SCRIPT (FINAL)
+// ✅ PHONEPE V2 PRODUCTION + SANDBOX READY (FINAL PERLYN BUILD)
 // ============================================================
 
 import express from "express";
@@ -17,8 +17,15 @@ app.use(express.static("public"));
 // ============================================================
 // 🔧 ENVIRONMENT VARIABLES
 // ============================================================
+// Add these in Railway's Variables section:
+// MODE="sandbox" or "production"
+// CLIENT_ID="YOUR_CLIENT_ID"
+// CLIENT_SECRET="YOUR_CLIENT_SECRET"
+// CLIENT_VERSION="1"
+// MERCHANT_ID="M23DQ1ZV3KCPW"  (yours)
+// PORT=5000
 const {
-  MODE,            // "production" or "sandbox"
+  MODE,
   CLIENT_ID,
   CLIENT_SECRET,
   CLIENT_VERSION,
@@ -27,7 +34,7 @@ const {
 } = process.env;
 
 // ============================================================
-// 🔗 PRODUCTION / SANDBOX URLs
+// 🔗 API BASE URLs
 // ============================================================
 const BASE_URL =
   MODE === "production"
@@ -38,10 +45,11 @@ const AUTH_URL = `${BASE_URL}/oauth/token`;
 const PAYMENT_URL =
   MODE === "production"
     ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay"; // ✅ fixed missing quote
+    : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2/pay";
+
 
 // ============================================================
-// ✅ AUTH TOKEN FETCHER
+// ✅ AUTH TOKEN FETCH
 // ============================================================
 async function getAuthToken() {
   console.log(`\n🔐 Requesting Auth Token from: ${AUTH_URL}`);
@@ -55,9 +63,7 @@ async function getAuthToken() {
 
   const res = await fetch(AUTH_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params
   });
 
@@ -72,33 +78,34 @@ async function getAuthToken() {
   return data.access_token;
 }
 
+
 // ============================================================
-// ✅ CREATE PAYMENT (PG CHECKOUT FLOW)
+// ✅ PAYMENT CREATION ENDPOINT
 // ============================================================
 app.get("/pay", async (req, res) => {
   try {
     const token = await getAuthToken();
     const ts = Date.now();
     const merchantOrderId = `ORDER${ts}`;
-    const amount = 1000; // ₹10.00 (in paise)
+    const amount = 1000; // ₹10.00 in paise
 
-    // ✅ Payload (matches Postman exactly)
+    // ✅ Payload exactly as per API docs
     const payload = {
       merchantOrderId,
       amount,
       expireAfter: 1200,
       metaInfo: {
-        udf1: "prod test 1",
-        udf2: "live param 2",
-        udf3: "info3",
-        udf4: "extra field 4",
-        udf5: "live info ref"
+        udf1: "perlyn_test_1",
+        udf2: "param_2",
+        udf3: "param_3",
+        udf4: "param_4",
+        udf5: "param_5"
       },
       paymentFlow: {
         type: "PG_CHECKOUT",
-        message: "PhonePe PG Production Test",
+        message: "Payment message for Perlyn checkout",
         merchantUrls: {
-          redirectUrl: `http://localhost:${PORT}/success/${merchantOrderId}`
+          redirectUrl: `https://www.perlynbeauty.co/success/${merchantOrderId}`
         }
       }
     };
@@ -106,7 +113,6 @@ app.get("/pay", async (req, res) => {
     console.log("\n🧾 Payload Sent:");
     console.log(JSON.stringify(payload, null, 2));
 
-    // ✅ POST request to PhonePe API
     const response = await fetch(PAYMENT_URL, {
       method: "POST",
       headers: {
@@ -136,23 +142,21 @@ app.get("/pay", async (req, res) => {
       console.log("\n✅ Mercury Payment URL Found:");
       console.log(mercuryUrl);
 
-      // ✅ Render sandbox confirmation page
       res.send(`
         <html>
-        <body style="font-family:sans-serif;text-align:center;background:#f3e4db;color:#4b3b32;">
-          <h2>✅ Mercury Sandbox Ready</h2>
-          <p>Click below to open the checkout page:</p>
-          <a href="${mercuryUrl}" target="_blank"
-             style="display:inline-block;background:#b98474;color:#fff;
-             padding:12px 24px;border-radius:8px;text-decoration:none;">
-             Open Payment Page</a>
-          <br><br>
-          <small>${mercuryUrl}</small>
-        </body>
+          <body style="font-family:sans-serif;text-align:center;background:#f3e4db;color:#4b3b32;">
+            <h2>✅ Mercury Sandbox Ready</h2>
+            <p>Click below to open the checkout page:</p>
+            <a href="${mercuryUrl}" target="_blank"
+               style="display:inline-block;background:#b98474;color:#fff;
+               padding:12px 24px;border-radius:8px;text-decoration:none;">
+               Open Payment Page</a>
+            <br><br><small>${mercuryUrl}</small>
+          </body>
         </html>
       `);
     } else {
-      console.warn("\n⚠️ No Mercury redirect URL found. Full response below:");
+      console.warn("\n⚠️ No Mercury redirect URL found. Full response:");
       console.log(JSON.stringify(data, null, 2));
 
       res.status(400).send(`
@@ -166,24 +170,37 @@ app.get("/pay", async (req, res) => {
   }
 });
 
+
 // ============================================================
 // ✅ SUCCESS PAGE
 // ============================================================
 app.get("/success/:id", (req, res) => {
   res.send(`
     <html>
-    <body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
-      <h2>🎉 Payment Complete!</h2>
-      <p>Order ID: ${req.params.id}</p>
-      <a href="/pay">Start New Payment</a>
-    </body>
+      <body style="background:#d1ffd1;text-align:center;font-family:sans-serif;">
+        <h2>🎉 Payment Simulation Complete!</h2>
+        <p>Order ID: ${req.params.id}</p>
+        <a href="/pay">Start New Payment</a>
+      </body>
     </html>
   `);
 });
 
+
 // ============================================================
-// 🚀 START SERVER
+// ✅ WEBHOOK ENDPOINT (REQUIRED FOR LIVE APPROVAL)
 // ============================================================
-app.listen(PORT || 5000, () => {
-  console.log(`🚀 PhonePe V2 Proto running at http://localhost:${PORT || 5000}`);
+app.post("/phonepe/webhook", (req, res) => {
+  console.log("📩 Webhook received:", req.body);
+  // TODO: verify signature once SALT_KEY & SALT_INDEX are provided
+  res.status(200).send("Webhook acknowledged");
+});
+
+
+// ============================================================
+// 🚀 START SERVER (Railway Auto PORT)
+// ============================================================
+const port = PORT || process.env.PORT || 5000;
+app.listen(port, () => {
+  console.log(`🚀 PhonePe V2 Proto running at http://localhost:${port}`);
 });
