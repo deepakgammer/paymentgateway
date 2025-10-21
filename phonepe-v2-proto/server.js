@@ -130,6 +130,51 @@ app.get("/pay", async (req, res) => {
     res.status(500).send(`<pre>${err.message}</pre>`);
   }
 });
+// ============================================================
+// ✅ CREATE PAYMENT API — Called from Perlyn frontend
+// ============================================================
+app.post("/create-payment", async (req, res) => {
+  try {
+    const token = await getAuthToken();
+    const ts = Date.now();
+    const merchantOrderId = `ORDER${ts}`;
+    const { amount } = req.body || { amount: 1000 };
+
+    const payload = {
+      merchantOrderId,
+      amount,
+      expireAfter: 1200,
+      metaInfo: { udf1: "perlyn_live_payment" },
+      paymentFlow: {
+        type: "PG_CHECKOUT",
+        message: "Perlyn Payment",
+        merchantUrls: {
+          redirectUrl: `https://www.perlynbeauty.co/success/${merchantOrderId}`,
+        },
+      },
+    };
+
+    const response = await fetch(PAYMENT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `O-Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    console.log("📦 PhonePe Response:", data);
+
+    res.json({
+      orderId: merchantOrderId,
+      redirectUrl: data.redirectUrl || data.data?.redirectUrl,
+    });
+  } catch (err) {
+    console.error("❌ Payment creation failed:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ============================================================
 // ✅ RESULT REDIRECTION HANDLER
@@ -163,3 +208,4 @@ const port = PORT || process.env.PORT || 5000;
 app.listen(port, () => {
   console.log(`🚀 PhonePe V2 Proto running live on Render (port ${port})`);
 });
+
