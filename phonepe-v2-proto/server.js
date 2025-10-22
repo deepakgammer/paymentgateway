@@ -1,11 +1,12 @@
 // ============================================================
-// ✅ PHONEPE V2 — FINAL PRODUCTION RENDER DEPLOYMENT (PERLYN LIVE BUILD)
+// ✅ PHONEPE V2 — FINAL PRODUCTION + REWARD POINTS INTEGRATION
 // ============================================================
 
 import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
 import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
 const app = express();
@@ -18,12 +19,13 @@ app.use(express.static("public"));
 // 🔧 ENV VARIABLES
 // ============================================================
 const {
-  MODE,               // "production" or "sandbox"
+  MODE, // "production" or "sandbox"
   CLIENT_ID,
   CLIENT_SECRET,
   CLIENT_VERSION,
-  MERCHANT_ID,        // (kept for future use)
+  MERCHANT_ID,
   PORT,
+  SUPABASE_SERVICE_KEY,
 } = process.env;
 
 // ============================================================
@@ -44,10 +46,18 @@ const STATUS_BASE = IS_PROD
   : "https://api-preprod.phonepe.com/apis/pg-sandbox/checkout/v2";
 
 // ============================================================
+// 🧩 SUPABASE CLIENT (SERVER-SIDE)
+// ============================================================
+const supabase = createClient(
+  "https://rlxfpyrzxfheufhuetju.supabase.co",
+  SUPABASE_SERVICE_KEY
+);
+
+// ============================================================
 // 🔐 AUTH TOKEN (with lightweight cache)
 // ============================================================
-let cachedTokenObj = null;  // { token, type }
-let tokenExpiryTs = 0;      // ms epoch
+let cachedTokenObj = null;
+let tokenExpiryTs = 0;
 
 async function getAuthToken() {
   const now = Date.now();
@@ -94,12 +104,43 @@ async function getAuthToken() {
   const type = data?.token_type || "Bearer";
   cachedTokenObj = { token, type };
 
-  // Cache for ~14 minutes (typical 15m token)
-  tokenExpiryTs = now + 14 * 60 * 1000;
+  tokenExpiryTs = now + 14 * 60 * 1000; // cache 14 min
 
   console.log("✅ Auth Token fetched successfully");
   console.log(`🔑 Token Type: ${type}`);
   return cachedTokenObj;
+}
+
+// ============================================================
+// 🪙 ADD REWARD POINTS FUNCTION
+// ============================================================
+async function addRewardPoints(userId, amount, orderId) {
+  try {
+    const pointsToAdd = Math.floor(amount / 10); // 10 points per ₹100 spent
+
+    const { error } = await supabase.rpc("increment_reward_points", {
+      uid: userId,
+      points_to_add: pointsToAdd,
+    });
+
+    if (error) throw error;
+
+    console.log(`🎯 Added ${pointsToAdd} points for user ${userId}`);
+
+    // Optional history log
+    await supabase.from("reward_history").insert([
+      {
+        user_id: userId,
+        order_id: orderId,
+        points_added: pointsToAdd,
+      },
+    ]);
+
+    return pointsToAdd;
+  } catch (err) {
+    console.error("⚠️ Reward update failed:", err.message);
+    return 0;
+  }
 }
 
 // ============================================================
@@ -108,18 +149,17 @@ async function getAuthToken() {
 app.post("/create-payment", async (req, res) => {
   try {
     const { amount, orderId } = req.body;
-    if (!amount || !orderId) {
+    if (!amount || !orderId)
       return res
         .status(400)
         .json({ success: false, message: "Missing amount or orderId" });
-    }
 
     const { token, type } = await getAuthToken();
 
     const payload = {
       merchantOrderId: orderId,
-      amount: Math.round(Number(amount) * 100), // amount in paise
-      expireAfter: 1200, // 20 mins
+      amount: Math.round(Number(amount) * 100),
+      expireAfter: 1200,
       metaInfo: { udf1: "perlyn_live_payment" },
       paymentFlow: {
         type: "PG_CHECKOUT",
@@ -131,8 +171,7 @@ app.post("/create-payment", async (req, res) => {
       },
     };
 
-    console.log("\n🧾 Payment Payload:");
-    console.log(JSON.stringify(payload, null, 2));
+    console.log("\n🧾 Payment Payload:", JSON.stringify(payload, null, 2));
 
     const response = await fetch(PAYMENT_URL, {
       method: "POST",
@@ -146,12 +185,10 @@ app.post("/create-payment", async (req, res) => {
     const text = await response.text();
     console.log("\n📥 Raw Payment Response:", text);
 
-    if (!response.ok) {
-      console.error("❌ Payment API HTTP error:", response.status, text);
+    if (!response.ok)
       return res
         .status(400)
         .json({ success: false, message: "Payment API Error" });
-    }
 
     let data;
     try {
@@ -162,9 +199,8 @@ app.post("/create-payment", async (req, res) => {
         .json({ success: false, message: "Invalid JSON from PhonePe Payment" });
     }
 
-    // Some responses carry { code: "SUCCESS" }
     if (data.code && data.code !== "SUCCESS") {
-      console.warn("⚠️ PhonePe init failed with code:", data.code);
+      console.warn("⚠️ PhonePe init failed:", data.code);
       return res
         .status(400)
         .json({ success: false, message: data.message || "PhonePe Error", data });
@@ -180,7 +216,7 @@ app.post("/create-payment", async (req, res) => {
       return res.json({ success: true, redirectUrl: mercuryUrl });
     }
 
-    console.warn("⚠️ No redirect URL found in response:", data);
+    console.warn("⚠️ No redirect URL found in response");
     return res.status(400).json({ success: false, data });
   } catch (err) {
     console.error("❌ Error during /create-payment:", err.message);
@@ -189,7 +225,7 @@ app.post("/create-payment", async (req, res) => {
 });
 
 // ============================================================
-// ✅ VERIFY PAYMENT STATUS — V2 ENDPOINT
+// ✅ VERIFY PAYMENT STATUS — V2 ENDPOINT + REWARD ADD
 // ============================================================
 app.get("/verify/:id", async (req, res) => {
   const orderId = req.params.id;
@@ -199,7 +235,8 @@ app.get("/verify/:id", async (req, res) => {
     const statusUrl = `${STATUS_BASE}/order/${encodeURIComponent(
       orderId
     )}/status`;
-    console.log(`\n🔍 Verifying order status via V2 API: ${statusUrl}`);
+
+    console.log(`\n🔍 Verifying order status: ${statusUrl}`);
 
     const statusResponse = await fetch(statusUrl, {
       method: "GET",
@@ -225,7 +262,7 @@ app.get("/verify/:id", async (req, res) => {
     if (state === "COMPLETED" || state === "SUCCESS") {
       console.log("✅ Payment verified as SUCCESSFUL");
 
-      // Non-blocking order save (if your endpoint is down, still continue)
+      // 💾 Save order remotely
       try {
         await fetch("https://perlynbeauty.co/order-save", {
           method: "POST",
@@ -238,7 +275,26 @@ app.get("/verify/:id", async (req, res) => {
           }),
         });
       } catch (saveErr) {
-        console.warn("⚠️ Order save failed, continuing redirect:", saveErr.message);
+        console.warn("⚠️ Order save failed:", saveErr.message);
+      }
+
+      // 🪙 Reward points integration
+      try {
+        // Get user_id linked to order
+        const { data: orderData } = await supabase
+          .from("orders")
+          .select("user_id")
+          .eq("order_id", orderId)
+          .maybeSingle();
+
+        if (orderData?.user_id) {
+          const added = await addRewardPoints(orderData.user_id, amount, orderId);
+          console.log(`✅ Reward points (${added}) added to ${orderData.user_id}`);
+        } else {
+          console.warn("⚠️ No user_id found for order:", orderId);
+        }
+      } catch (err) {
+        console.error("⚠️ Reward process error:", err.message);
       }
 
       return res.redirect(
@@ -250,16 +306,12 @@ app.get("/verify/:id", async (req, res) => {
 
     console.log(`❌ Payment not successful (State: ${state})`);
     return res.redirect(
-      `https://www.perlynbeauty.co/fail.html?orderId=${encodeURIComponent(
-        orderId
-      )}`
+      `https://www.perlynbeauty.co/fail.html?orderId=${encodeURIComponent(orderId)}`
     );
   } catch (err) {
     console.error("⚠️ Error verifying payment:", err.message);
     return res.redirect(
-      `https://www.perlynbeauty.co/fail.html?orderId=${encodeURIComponent(
-        req.params.id
-      )}`
+      `https://www.perlynbeauty.co/fail.html?orderId=${encodeURIComponent(orderId)}`
     );
   }
 });
