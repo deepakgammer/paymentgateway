@@ -158,19 +158,23 @@ app.post("/create-payment", async (req, res) => {
 });
 
 // ============================================================
-// ✅ VERIFY PAYMENT STATUS — For redirect after payment
+// ✅ VERIFY PAYMENT STATUS — V2 ENDPOINT (FINAL FIX)
 // ============================================================
 app.get("/verify/:id", async (req, res) => {
   const orderId = req.params.id;
   try {
     const { token, type } = await getAuthToken();
 
-    const statusUrl = `https://api.phonepe.com/apis/pg/v1/status/${MERCHANT_ID}/${orderId}`;
-    console.log(`\n🔍 Verifying payment status: ${statusUrl}`);
+    // ✅ Corrected V2 API endpoint
+    const statusUrl = `https://api.phonepe.com/apis/pg/checkout/v2/order/${orderId}/status`;
+    console.log(`\n🔍 Verifying order status via V2 API: ${statusUrl}`);
 
     const statusResponse = await fetch(statusUrl, {
       method: "GET",
-      headers: { Authorization: `${type} ${token}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `${type} ${token}`,
+      },
     });
 
     const text = await statusResponse.text();
@@ -180,22 +184,30 @@ app.get("/verify/:id", async (req, res) => {
     try {
       data = JSON.parse(text);
     } catch {
-      throw new Error("Invalid JSON response from PhonePe Status API");
+      throw new Error("Invalid JSON from PhonePe status API");
     }
 
-    const code = data?.code || data?.data?.code || "";
-    const state = data?.data?.state || data?.state || "";
+    const state = data?.state || data?.data?.state || "UNKNOWN";
+    const amount = data?.amount / 100 || "NA";
 
-    // ✅ Works for both sandbox and production
-    if (
-      code === "PAYMENT_SUCCESS" ||
-      state === "COMPLETED" ||
-      state === "SUCCESS"
-    ) {
-      console.log("✅ Payment verified successfully!");
+    if (state === "COMPLETED" || state === "SUCCESS") {
+      console.log("✅ Payment verified as SUCCESSFUL");
+
+      // Optional: store or trigger fulfillment here
+      await fetch("https://perlynbeauty.co/order-save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId,
+          amount,
+          status: "SUCCESS",
+          timestamp: Date.now(),
+        }),
+      });
+
       return res.redirect("https://www.perlynbeauty.co/success.html");
     } else {
-      console.log("❌ Payment not successful:", code, state);
+      console.log(`❌ Payment not successful (State: ${state})`);
       return res.redirect("https://www.perlynbeauty.co/fail.html");
     }
   } catch (err) {
@@ -219,3 +231,4 @@ const port = PORT || 5000;
 app.listen(port, () => {
   console.log(`🚀 PhonePe V2 running in ${MODE} mode on port ${port}`);
 });
+
