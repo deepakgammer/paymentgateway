@@ -95,21 +95,24 @@ app.post("/create-payment", async (req, res) => {
   try {
     const { amount, orderId } = req.body;
     if (!amount || !orderId) {
-      return res.status(400).json({ success: false, message: "Missing amount or orderId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing amount or orderId" });
     }
 
     const { token, type } = await getAuthToken();
 
     const payload = {
       merchantOrderId: orderId,
-      amount: amount * 100,
-      expireAfter: 1200,
+      amount: amount * 100, // amount in paise
+      expireAfter: 1200, // 20 mins
       metaInfo: { udf1: "perlyn_live_payment" },
       paymentFlow: {
         type: "PG_CHECKOUT",
         message: "Perlyn Beauty Payment Gateway",
         merchantUrls: {
-          redirectUrl: `https://paymentgateway-uvsq.onrender.com/verify/${orderId}`, // ✅ Updated
+          redirectUrl: `https://paymentgateway-uvsq.onrender.com/verify/${orderId}`,
+          callbackUrl: `https://paymentgateway-uvsq.onrender.com/phonepe/webhook`,
         },
       },
     };
@@ -155,7 +158,7 @@ app.post("/create-payment", async (req, res) => {
 });
 
 // ============================================================
-// ✅ VERIFY PAYMENT STATUS — Before redirecting to success/fail
+// ✅ VERIFY PAYMENT STATUS — For redirect after payment
 // ============================================================
 app.get("/verify/:id", async (req, res) => {
   const orderId = req.params.id;
@@ -163,7 +166,7 @@ app.get("/verify/:id", async (req, res) => {
     const { token, type } = await getAuthToken();
 
     const statusUrl = `https://api.phonepe.com/apis/pg/v1/status/${MERCHANT_ID}/${orderId}`;
-    console.log(`\n🔍 Verifying order status: ${statusUrl}`);
+    console.log(`\n🔍 Verifying payment status: ${statusUrl}`);
 
     const statusResponse = await fetch(statusUrl, {
       method: "GET",
@@ -173,14 +176,26 @@ app.get("/verify/:id", async (req, res) => {
     const text = await statusResponse.text();
     console.log("📦 Status Response:", text);
 
-    const data = JSON.parse(text);
-    const state = data?.data?.state || data?.state || "UNKNOWN";
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error("Invalid JSON response from PhonePe Status API");
+    }
 
-    if (state === "COMPLETED" || state === "SUCCESS") {
-      console.log("✅ Payment confirmed successful!");
+    const code = data?.code || data?.data?.code || "";
+    const state = data?.data?.state || data?.state || "";
+
+    // ✅ Works for both sandbox and production
+    if (
+      code === "PAYMENT_SUCCESS" ||
+      state === "COMPLETED" ||
+      state === "SUCCESS"
+    ) {
+      console.log("✅ Payment verified successfully!");
       return res.redirect("https://www.perlynbeauty.co/success.html");
     } else {
-      console.log("❌ Payment not successful:", state);
+      console.log("❌ Payment not successful:", code, state);
       return res.redirect("https://www.perlynbeauty.co/fail.html");
     }
   } catch (err) {
@@ -190,7 +205,7 @@ app.get("/verify/:id", async (req, res) => {
 });
 
 // ============================================================
-// ✅ WEBHOOK — Payment Updates
+// ✅ WEBHOOK — Payment Update Notifications
 // ============================================================
 app.post("/phonepe/webhook", (req, res) => {
   console.log("🔔 Webhook received:", req.body);
