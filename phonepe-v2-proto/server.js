@@ -105,9 +105,7 @@ async function getAuthToken() {
   cachedTokenObj = { token, type };
 
   tokenExpiryTs = now + 14 * 60 * 1000; // cache 14 min
-
   console.log("✅ Auth Token fetched successfully");
-  console.log(`🔑 Token Type: ${type}`);
   return cachedTokenObj;
 }
 
@@ -118,16 +116,16 @@ async function addRewardPoints(userId, amount, orderId) {
   try {
     const pointsToAdd = Math.floor(amount / 10); // 10 points per ₹100 spent
 
+    // Increment user reward total
     const { error } = await supabase.rpc("increment_reward_points", {
       uid: userId,
       points_to_add: pointsToAdd,
     });
 
     if (error) throw error;
-
     console.log(`🎯 Added ${pointsToAdd} points for user ${userId}`);
 
-    // Optional history log
+    // Optional: Insert reward history
     await supabase.from("reward_history").insert([
       {
         user_id: userId,
@@ -149,10 +147,11 @@ async function addRewardPoints(userId, amount, orderId) {
 app.post("/create-payment", async (req, res) => {
   try {
     const { amount, orderId } = req.body;
-    if (!amount || !orderId)
+    if (!amount || !orderId) {
       return res
         .status(400)
         .json({ success: false, message: "Missing amount or orderId" });
+    }
 
     const { token, type } = await getAuthToken();
 
@@ -185,20 +184,14 @@ app.post("/create-payment", async (req, res) => {
     const text = await response.text();
     console.log("\n📥 Raw Payment Response:", text);
 
-    if (!response.ok)
+    if (!response.ok) {
+      console.error("❌ Payment API HTTP error:", response.status);
       return res
         .status(400)
         .json({ success: false, message: "Payment API Error" });
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return res
-        .status(500)
-        .json({ success: false, message: "Invalid JSON from PhonePe Payment" });
     }
 
+    const data = JSON.parse(text);
     if (data.code && data.code !== "SUCCESS") {
       console.warn("⚠️ PhonePe init failed:", data.code);
       return res
@@ -232,10 +225,7 @@ app.get("/verify/:id", async (req, res) => {
   try {
     const { token, type } = await getAuthToken();
 
-    const statusUrl = `${STATUS_BASE}/order/${encodeURIComponent(
-      orderId
-    )}/status`;
-
+    const statusUrl = `${STATUS_BASE}/order/${encodeURIComponent(orderId)}/status`;
     console.log(`\n🔍 Verifying order status: ${statusUrl}`);
 
     const statusResponse = await fetch(statusUrl, {
@@ -249,13 +239,7 @@ app.get("/verify/:id", async (req, res) => {
     const text = await statusResponse.text();
     console.log("📦 Status Response:", text);
 
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error("Invalid JSON from PhonePe status API");
-    }
-
+    const data = JSON.parse(text);
     const state = data?.state || data?.data?.state || "UNKNOWN";
     const amount = (data?.amount || data?.data?.amount || 0) / 100;
 
@@ -280,7 +264,6 @@ app.get("/verify/:id", async (req, res) => {
 
       // 🪙 Reward points integration
       try {
-        // Get user_id linked to order
         const { data: orderData } = await supabase
           .from("orders")
           .select("user_id")
@@ -298,9 +281,7 @@ app.get("/verify/:id", async (req, res) => {
       }
 
       return res.redirect(
-        `https://www.perlynbeauty.co/success.html?orderId=${encodeURIComponent(
-          orderId
-        )}`
+        `https://www.perlynbeauty.co/success.html?orderId=${encodeURIComponent(orderId)}`
       );
     }
 
@@ -328,7 +309,7 @@ app.post("/phonepe/webhook", (req, res) => {
 // 🩺 HEALTH / ROOT
 // ============================================================
 app.get("/", (req, res) => {
-  res.send("💄 Perlyn Beauty Payment Gateway is running successfully!");
+  res.send("💄 Perlyn Beauty Payment Gateway + Rewards is running successfully!");
 });
 
 // ============================================================
