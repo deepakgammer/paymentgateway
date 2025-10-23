@@ -220,14 +220,18 @@ app.post("/create-payment", async (req, res) => {
 // ============================================================
 // ✅ VERIFY PAYMENT STATUS — V2 ENDPOINT + REWARD ADD
 // ============================================================
+// ============================================================
+// ✅ VERIFY PAYMENT STATUS — V2 ENDPOINT + REWARD SAFETY FIX
+// ============================================================
 app.get("/verify/:id", async (req, res) => {
   const orderId = req.params.id;
+
   try {
     const { token, type } = await getAuthToken();
-
     const statusUrl = `${STATUS_BASE}/order/${encodeURIComponent(orderId)}/status`;
     console.log(`\n🔍 Verifying order status: ${statusUrl}`);
 
+    // 🔹 Check status from PhonePe
     const statusResponse = await fetch(statusUrl, {
       method: "GET",
       headers: {
@@ -246,7 +250,7 @@ app.get("/verify/:id", async (req, res) => {
     if (state === "COMPLETED" || state === "SUCCESS") {
       console.log("✅ Payment verified as SUCCESSFUL");
 
-      // 💾 Save order remotely
+      // 💾 Save order remotely (mirror to your frontend DB)
       try {
         await fetch("https://perlynbeauty.co/order-save", {
           method: "POST",
@@ -262,7 +266,7 @@ app.get("/verify/:id", async (req, res) => {
         console.warn("⚠️ Order save failed:", saveErr.message);
       }
 
-      // 🪙 Reward points integration
+      // 🪙 Reward points — safe single-credit logic
       try {
         const { data: orderData } = await supabase
           .from("orders")
@@ -271,8 +275,21 @@ app.get("/verify/:id", async (req, res) => {
           .maybeSingle();
 
         if (orderData?.user_id) {
-          const added = await addRewardPoints(orderData.user_id, amount, orderId);
-          console.log(`✅ Reward points (${added}) added to ${orderData.user_id}`);
+          // 🧠 Check if this order already has reward history
+          const { data: existing, error: checkErr } = await supabase
+            .from("reward_history")
+            .select("id")
+            .eq("order_id", orderId)
+            .limit(1);
+
+          if (checkErr) console.warn("⚠️ Reward history check failed:", checkErr.message);
+
+          if (existing && existing.length > 0) {
+            console.log("⚠️ Reward already added for this order:", orderId);
+          } else {
+            const added = await addRewardPoints(orderData.user_id, amount, orderId);
+            console.log(`✅ Reward points (${added}) added for user ${orderData.user_id}`);
+          }
         } else {
           console.warn("⚠️ No user_id found for order:", orderId);
         }
@@ -280,15 +297,18 @@ app.get("/verify/:id", async (req, res) => {
         console.error("⚠️ Reward process error:", err.message);
       }
 
+      // ✅ Redirect to success page
       return res.redirect(
         `https://www.perlynbeauty.co/success.html?orderId=${encodeURIComponent(orderId)}`
       );
     }
 
+    // ❌ Payment failed / pending
     console.log(`❌ Payment not successful (State: ${state})`);
     return res.redirect(
       `https://www.perlynbeauty.co/fail.html?orderId=${encodeURIComponent(orderId)}`
     );
+
   } catch (err) {
     console.error("⚠️ Error verifying payment:", err.message);
     return res.redirect(
@@ -296,6 +316,7 @@ app.get("/verify/:id", async (req, res) => {
     );
   }
 });
+
 
 // ============================================================
 // ✅ WEBHOOK — Payment Update Notifications
