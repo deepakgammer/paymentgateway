@@ -7,6 +7,8 @@ import fetch from "node-fetch";
 import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
+import nodemailer from "nodemailer";
+
 
 dotenv.config();
 const app = express();
@@ -242,67 +244,67 @@ app.get("/verify/:id", async (req, res) => {
 
     const text = await statusResponse.text();
     console.log("📦 Status Response:", text);
+const data = JSON.parse(text);
+const state = data?.state || data?.data?.state || "UNKNOWN";
+const amount = (data?.amount || data?.data?.amount || 0) / 100;
 
-    const data = JSON.parse(text);
-    const state = data?.state || data?.data?.state || "UNKNOWN";
-    const amount = (data?.amount || data?.data?.amount || 0) / 100;
+if (state === "COMPLETED" || state === "SUCCESS") {
+  console.log("✅ Payment verified as SUCCESSFUL");
 
-    if (state === "COMPLETED" || state === "SUCCESS") {
-      console.log("✅ Payment verified as SUCCESSFUL");
+  try {
+    await fetch("https://perlynbeauty.co/order-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId,
+        amount,
+        status: "SUCCESS",
+        verifiedAt: new Date().toISOString(),
+      }),
+    });
+  } catch (saveErr) {
+    console.warn("⚠️ Order save failed:", saveErr.message);
+  }
 
-      // 💾 Save order remotely (mirror to your frontend DB)
-      try {
-        await fetch("https://perlynbeauty.co/order-save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orderId,
-            amount,
-            status: "SUCCESS",
-            verifiedAt: new Date().toISOString(),
-          }),
-        });
-      } catch (saveErr) {
-        console.warn("⚠️ Order save failed:", saveErr.message);
+  try {
+    const { data: orderData } = await supabase
+      .from("orders")
+      .select("user_id, phone")
+      .eq("order_id", orderId)
+      .maybeSingle();
+
+    if (orderData?.user_id) {
+      const { data: existing } = await supabase
+        .from("reward_history")
+        .select("id")
+        .eq("order_id", orderId)
+        .limit(1);
+
+      if (!existing?.length) {
+        const added = await addRewardPoints(orderData.user_id, amount, orderId);
+        console.log(`✅ Reward points (${added}) added for user ${orderData.user_id}`);
       }
 
-      // 🪙 Reward points — safe single-credit logic
-      try {
-        const { data: orderData } = await supabase
-          .from("orders")
-          .select("user_id")
-          .eq("order_id", orderId)
-          .maybeSingle();
+      const { data: userData } = await supabase
+        .from("profiles")
+        .select("email, full_name")
+        .eq("id", orderData.user_id)
+        .maybeSingle();
 
-        if (orderData?.user_id) {
-          // 🧠 Check if this order already has reward history
-          const { data: existing, error: checkErr } = await supabase
-            .from("reward_history")
-            .select("id")
-            .eq("order_id", orderId)
-            .limit(1);
+      if (userData?.email)
+        await sendOrderEmail(userData.email, userData.full_name, orderId, amount);
 
-          if (checkErr) console.warn("⚠️ Reward history check failed:", checkErr.message);
-
-          if (existing && existing.length > 0) {
-            console.log("⚠️ Reward already added for this order:", orderId);
-          } else {
-            const added = await addRewardPoints(orderData.user_id, amount, orderId);
-            console.log(`✅ Reward points (${added}) added for user ${orderData.user_id}`);
-          }
-        } else {
-          console.warn("⚠️ No user_id found for order:", orderId);
-        }
-      } catch (err) {
-        console.error("⚠️ Reward process error:", err.message);
-      }
-
-      // ✅ Redirect to success page
-      return res.redirect(
-        `https://www.perlynbeauty.co/success.html?orderId=${encodeURIComponent(orderId)}`
-      );
+      if (orderData.phone)
+        await sendSMS(orderData.phone, orderId);
     }
+  } catch (err) {
+    console.error("⚠️ Reward/email process error:", err.message);
+  }
 
+  return res.redirect(
+    `https://www.perlynbeauty.co/success.html?orderId=${encodeURIComponent(orderId)}`
+  );
+}
     // ❌ Payment failed / pending
     console.log(`❌ Payment not successful (State: ${state})`);
     return res.redirect(
@@ -316,6 +318,75 @@ app.get("/verify/:id", async (req, res) => {
     );
   }
 });
+// ============================================================
+// 💌 Send Order Confirmation Email
+// ============================================================
+async function sendOrderEmail(to, name, orderId, amount) {
+  try {
+    if (!process.env.PERLYN_EMAIL || !process.env.PERLYN_APP_PASSWORD) {
+      console.warn("⚠️ Email credentials missing — skipping email");
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.PERLYN_EMAIL,
+        pass: process.env.PERLYN_APP_PASSWORD,
+      },
+    });
+
+    const html = `
+      <div style="font-family:'Cormorant Garamond',serif;background:#fff6f0;padding:25px;border-radius:14px;color:#4b3b32">
+        <h2>✨ Order Placed Successfully!</h2>
+        <p>Hi <b>${name || "Customer"}</b>,</p>
+        <p>Thank you for shopping with <b>Perlyn Beauty</b>.</p>
+        <p>Your order <b>#${orderId}</b> has been placed successfully.</p>
+        <p>It will be <b>dispatched within 3 days</b> and delivered within <b>5–7 days</b> after dispatch.</p>
+        <p><b>Amount:</b> ₹${amount}</p>
+        <p style="color:#b98474;margin-top:12px">We’ll notify you once your package ships 🚚</p>
+        <br><p>With love, <b>Team Perlyn Beauty 💖</b></p>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"Perlyn Beauty" <${process.env.PERLYN_EMAIL}>`,
+      to,
+      subject: `Your Perlyn Order #${orderId} — Confirmed`,
+      html,
+    });
+
+    console.log(`📧 Email sent to ${to}`);
+  } catch (err) {
+    console.error("❌ Email send failed:", err.message);
+  }
+}
+
+// ============================================================
+// 📱 Send SMS Confirmation (optional via Fast2SMS)
+// ============================================================
+async function sendSMS(phone, orderId) {
+  try {
+    if (!process.env.FAST2SMS_KEY) return;
+    const msg = `Order #${orderId} confirmed! Dispatched in 3 days, delivery in 5–7 days. - Perlyn Beauty 💖`;
+
+    await fetch("https://www.fast2sms.com/dev/bulkV2", {
+      method: "POST",
+      headers: { authorization: process.env.FAST2SMS_KEY },
+      body: new URLSearchParams({
+        route: "v3",
+        sender_id: "PERLYN",
+        message: msg,
+        language: "english",
+        numbers: phone,
+      }),
+    });
+
+    console.log(`📱 SMS sent to ${phone}`);
+  } catch (err) {
+    console.error("⚠️ SMS failed:", err.message);
+  }
+}
 
 
 // ============================================================
