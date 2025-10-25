@@ -218,7 +218,7 @@ app.post("/create-payment", async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
-
+//verify id 
 app.get("/verify/:id", async (req, res) => {
   const orderId = req.params.id;
 
@@ -316,6 +316,59 @@ app.get("/verify/:id", async (req, res) => {
     );
   }
 });
+// ============================================================
+// 🧾 SAVE ORDER STATUS TO SUPABASE (CALLED AFTER PAYMENT VERIFY)
+// ============================================================
+app.post("/order-save", async (req, res) => {
+  try {
+    const { orderId, amount, payment_status, verifiedAt } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: "Missing orderId" });
+    }
+
+    // 🔍 Check if order already exists
+    const { data: existingOrder } = await supabase
+      .from("orders")
+      .select("id")
+      .eq("order_id", orderId)
+      .maybeSingle();
+
+    if (existingOrder) {
+      // ✅ Update order status to completed
+      const { error: updateError } = await supabase
+        .from("orders")
+        .update({
+          payment_status: payment_status || "COMPLETED",
+          status: "Confirmed",
+          total_amount: amount || 0,
+          updated_at: verifiedAt || new Date().toISOString(),
+        })
+        .eq("order_id", orderId);
+
+      if (updateError) throw updateError;
+      console.log(`✅ Updated existing order: ${orderId}`);
+    } else {
+      // 🆕 If not found, create a new record
+      const { error: insertError } = await supabase.from("orders").insert([
+        {
+          order_id: orderId,
+          total_amount: amount || 0,
+          payment_status: payment_status || "COMPLETED",
+          status: "Confirmed",
+          created_at: verifiedAt || new Date().toISOString(),
+        },
+      ]);
+      if (insertError) throw insertError;
+      console.log(`✅ Inserted new order: ${orderId}`);
+    }
+
+    return res.json({ success: true, message: "Order saved successfully" });
+  } catch (err) {
+    console.error("❌ /order-save error:", err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // ============================================================
 // 💌 Send Order Confirmation Email
@@ -410,4 +463,5 @@ const port = PORT || 5000;
 app.listen(port, () => {
   console.log(`🚀 PhonePe V2 running in ${MODE} mode on port ${port}`);
 });
+
 
