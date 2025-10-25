@@ -219,12 +219,6 @@ app.post("/create-payment", async (req, res) => {
   }
 });
 
-// ============================================================
-// ✅ VERIFY PAYMENT STATUS — V2 ENDPOINT + REWARD ADD
-// ============================================================
-// ============================================================
-// ✅ VERIFY PAYMENT STATUS — V2 ENDPOINT + REWARD SAFETY FIX
-// ============================================================
 app.get("/verify/:id", async (req, res) => {
   const orderId = req.params.id;
 
@@ -233,7 +227,6 @@ app.get("/verify/:id", async (req, res) => {
     const statusUrl = `${STATUS_BASE}/order/${encodeURIComponent(orderId)}/status`;
     console.log(`\n🔍 Verifying order status: ${statusUrl}`);
 
-    // 🔹 Check status from PhonePe
     const statusResponse = await fetch(statusUrl, {
       method: "GET",
       headers: {
@@ -244,68 +237,73 @@ app.get("/verify/:id", async (req, res) => {
 
     const text = await statusResponse.text();
     console.log("📦 Status Response:", text);
-const data = JSON.parse(text);
-const state = data?.state || data?.data?.state || "UNKNOWN";
-const amount = (data?.amount || data?.data?.amount || 0) / 100;
 
-if (state === "COMPLETED" || state === "SUCCESS") {
-  console.log("✅ Payment verified as SUCCESSFUL");
+    const data = JSON.parse(text);
+    const state = data?.state || data?.data?.state || "UNKNOWN";
+    const amount = (data?.amount || data?.data?.amount || 0) / 100;
 
-  try {
-    await fetch("https://perlynbeauty.co/order-save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId,
-        amount,
-        status: "SUCCESS",
-        verifiedAt: new Date().toISOString(),
-      }),
-    });
-  } catch (saveErr) {
-    console.warn("⚠️ Order save failed:", saveErr.message);
-  }
+    // ✅ SUCCESS CASE — only here we save order + add rewards
+    if (state === "COMPLETED" || state === "SUCCESS") {
+      console.log("✅ Payment verified as SUCCESSFUL");
 
-  try {
-    const { data: orderData } = await supabase
-      .from("orders")
-      .select("user_id, phone")
-      .eq("order_id", orderId)
-      .maybeSingle();
-
-    if (orderData?.user_id) {
-      const { data: existing } = await supabase
-        .from("reward_history")
-        .select("id")
-        .eq("order_id", orderId)
-        .limit(1);
-
-      if (!existing?.length) {
-        const added = await addRewardPoints(orderData.user_id, amount, orderId);
-        console.log(`✅ Reward points (${added}) added for user ${orderData.user_id}`);
+      // Save only if successful
+      try {
+        await fetch("https://perlynbeauty.co/order-save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId,
+            amount,
+            payment_status: "COMPLETED",
+            verifiedAt: new Date().toISOString(),
+          }),
+        });
+      } catch (saveErr) {
+        console.warn("⚠️ Order save failed:", saveErr.message);
       }
 
-      const { data: userData } = await supabase
-        .from("profiles")
-        .select("email, full_name")
-        .eq("id", orderData.user_id)
-        .maybeSingle();
+      // ✅ Reward + Email + SMS
+      try {
+        const { data: orderData } = await supabase
+          .from("orders")
+          .select("user_id, phone")
+          .eq("order_id", orderId)
+          .maybeSingle();
 
-      if (userData?.email)
-        await sendOrderEmail(userData.email, userData.full_name, orderId, amount);
+        if (orderData?.user_id) {
+          const { data: existing } = await supabase
+            .from("reward_history")
+            .select("id")
+            .eq("order_id", orderId)
+            .limit(1);
 
-      if (orderData.phone)
-        await sendSMS(orderData.phone, orderId);
+          if (!existing?.length) {
+            const added = await addRewardPoints(orderData.user_id, amount, orderId);
+            console.log(`✅ Reward points (${added}) added for user ${orderData.user_id}`);
+          }
+
+          const { data: userData } = await supabase
+            .from("profiles")
+            .select("email, full_name")
+            .eq("id", orderData.user_id)
+            .maybeSingle();
+
+          if (userData?.email)
+            await sendOrderEmail(userData.email, userData.full_name, orderId, amount);
+
+          if (orderData.phone)
+            await sendSMS(orderData.phone, orderId);
+        }
+      } catch (err) {
+        console.error("⚠️ Reward/email process error:", err.message);
+      }
+
+      return res.redirect(
+        `https://www.perlynbeauty.co/success.html?orderId=${encodeURIComponent(orderId)}`
+      );
     }
-  } catch (err) {
-    console.error("⚠️ Reward/email process error:", err.message);
-  }
 
-  return res.redirect(
-    `https://www.perlynbeauty.co/success.html?orderId=${encodeURIComponent(orderId)}`
-  );
-}
-    // ❌ Payment failed / pending
+    // ❌ FAILED / CANCELLED / PENDING CASE — do NOT save
     console.log(`❌ Payment not successful (State: ${state})`);
     return res.redirect(
       `https://www.perlynbeauty.co/fail.html?orderId=${encodeURIComponent(orderId)}`
@@ -318,6 +316,7 @@ if (state === "COMPLETED" || state === "SUCCESS") {
     );
   }
 });
+
 // ============================================================
 // 💌 Send Order Confirmation Email
 // ============================================================
@@ -411,3 +410,4 @@ const port = PORT || 5000;
 app.listen(port, () => {
   console.log(`🚀 PhonePe V2 running in ${MODE} mode on port ${port}`);
 });
+
