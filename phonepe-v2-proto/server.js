@@ -218,7 +218,7 @@ app.post("/create-payment", async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
-//verify id 
+
 app.get("/verify/:id", async (req, res) => {
   const orderId = req.params.id;
 
@@ -248,7 +248,7 @@ app.get("/verify/:id", async (req, res) => {
 
       // Save only if successful
       try {
-        await fetch("https://perlynbeauty.co/order-save", {
+        await fetch("https://paymentgateway-uvsq.onrender.com/order-save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -328,14 +328,14 @@ app.post("/order-save", async (req, res) => {
     }
 
     // 🔍 Check if order already exists
-    const { data: existingOrder } = await supabase
+    const { data: existing } = await supabase
       .from("orders")
       .select("id")
       .eq("order_id", orderId)
       .maybeSingle();
 
-    if (existingOrder) {
-      // ✅ Update order status to completed
+    if (existing) {
+      // ✅ Update the existing order
       const { error: updateError } = await supabase
         .from("orders")
         .update({
@@ -347,9 +347,9 @@ app.post("/order-save", async (req, res) => {
         .eq("order_id", orderId);
 
       if (updateError) throw updateError;
-      console.log(`✅ Updated existing order: ${orderId}`);
+      console.log(`✅ Order updated successfully: ${orderId}`);
     } else {
-      // 🆕 If not found, create a new record
+      // 🆕 Insert a new order if missing
       const { error: insertError } = await supabase.from("orders").insert([
         {
           order_id: orderId,
@@ -360,13 +360,13 @@ app.post("/order-save", async (req, res) => {
         },
       ]);
       if (insertError) throw insertError;
-      console.log(`✅ Inserted new order: ${orderId}`);
+      console.log(`🆕 New order inserted: ${orderId}`);
     }
 
-    return res.json({ success: true, message: "Order saved successfully" });
+    res.json({ success: true, message: "Order saved/updated successfully" });
   } catch (err) {
     console.error("❌ /order-save error:", err.message);
-    return res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -463,5 +463,3 @@ const port = PORT || 5000;
 app.listen(port, () => {
   console.log(`🚀 PhonePe V2 running in ${MODE} mode on port ${port}`);
 });
-
-
