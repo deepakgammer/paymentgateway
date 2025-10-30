@@ -7,15 +7,18 @@ import fetch from "node-fetch";
 import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
+
 
 
 dotenv.config();
+const resend = new Resend(process.env.RESEND_KEY);
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static("public"));
+
 
 // ============================================================
 // 🔧 ENV VARIABLES
@@ -373,22 +376,14 @@ app.post("/order-save", async (req, res) => {
 });
 
 // ============================================================
-// 💌 Send Order Confirmation Email
+// 💌 Send Order Confirmation Email (via Resend)
 // ============================================================
 async function sendOrderEmail(to, name, orderId, amount) {
   try {
-    if (!process.env.PERLYN_EMAIL || !process.env.PERLYN_APP_PASSWORD) {
-      console.warn("⚠️ Email credentials missing — skipping email");
+    if (!process.env.RESEND_KEY || !process.env.RESEND_FROM) {
+      console.warn("⚠️ Resend credentials missing — skipping email");
       return;
     }
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.PERLYN_EMAIL,
-        pass: process.env.PERLYN_APP_PASSWORD,
-      },
-    });
 
     const html = `
       <div style="font-family:'Cormorant Garamond',serif;background:#fff6f0;padding:25px;border-radius:14px;color:#4b3b32">
@@ -396,27 +391,28 @@ async function sendOrderEmail(to, name, orderId, amount) {
         <p>Hi <b>${name || "Customer"}</b>,</p>
         <p>Thank you for shopping with <b>Perlyn Beauty</b>.</p>
         <p>Your order <b>#${orderId}</b> has been placed successfully.</p>
-        <p>It will be <b>dispatched within 3 days</b> and delivered within <b>5–7 days</b> after dispatch.</p>
+        <p>It will be <b>dispatched within 3 days</b> and delivered within <b>5–7 days</b>.</p>
         <p><b>Amount:</b> ₹${amount}</p>
         <p style="color:#b98474;margin-top:12px">We’ll notify you once your package ships 🚚</p>
         <br><p>With love, <b>Team Perlyn Beauty 💖</b></p>
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"Perlyn Beauty" <${process.env.PERLYN_EMAIL}>`,
+    await resend.emails.send({
+      from: process.env.RESEND_FROM,
       to,
       subject: `Your Perlyn Order #${orderId} — Confirmed`,
       html,
     });
 
-    console.log(`📧 Email sent to ${to}`);
+    console.log(`📧 Customer email sent via Resend to ${to}`);
   } catch (err) {
-    console.error("❌ Email send failed:", err.message);
+    console.error("❌ Resend email failed:", err.message);
   }
 }
+
 // ============================================================
-// 💌 ADMIN ALERT — New Order Notification
+// 💌 ADMIN ALERT — New Order Notification (via Resend)
 // ============================================================
 async function sendAdminNewOrderEmail(orderId) {
   try {
@@ -431,23 +427,14 @@ async function sendAdminNewOrderEmail(orderId) {
       return;
     }
 
-    if (!process.env.PERLYN_EMAIL || !process.env.PERLYN_APP_PASSWORD) {
-      console.warn("⚠️ Email credentials missing — cannot send admin alert");
+    if (!process.env.RESEND_KEY || !process.env.RESEND_FROM) {
+      console.warn("⚠️ Resend credentials missing — cannot send admin alert");
       return;
     }
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.PERLYN_EMAIL,
-        pass: process.env.PERLYN_APP_PASSWORD,
-      },
-    });
-
-    const subject = `📦 New Order Received — ${order.order_id}`;
     const html = `
       <div style="font-family:'Cormorant Garamond',serif;background:#fff8f4;padding:22px;border-radius:12px;color:#4b3b32">
-        <h2 style="color:#b98474;">New Order Received!</h2>
+        <h2 style="color:#b98474;">📦 New Order Received!</h2>
         <p><b>Order ID:</b> ${order.order_id}</p>
         <p><b>Customer:</b> ${order.name || "N/A"}</p>
         <p><b>Phone:</b> ${order.phone || "N/A"}</p>
@@ -460,18 +447,19 @@ async function sendAdminNewOrderEmail(orderId) {
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"Perlyn Beauty" <${process.env.PERLYN_EMAIL}>`,
-      to: "perlynbeauty@gmail.com", // You can add more admin emails comma-separated
-      subject,
+    await resend.emails.send({
+      from: process.env.RESEND_FROM,
+      to: "perlynbeauty@gmail.com",
+      subject: `📦 New Order Received — ${order.order_id}`,
       html,
     });
 
-    console.log(`📧 Admin alert sent for order: ${order.order_id}`);
+    console.log(`📧 Admin alert sent via Resend for order: ${order.order_id}`);
   } catch (err) {
-    console.error("❌ Failed to send admin order email:", err.message);
+    console.error("❌ Failed to send admin order email via Resend:", err.message);
   }
 }
+
 
 // ============================================================
 // 📱 Send SMS Confirmation (optional via Fast2SMS)
