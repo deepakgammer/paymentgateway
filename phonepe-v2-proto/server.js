@@ -350,20 +350,22 @@ app.post("/order-save", async (req, res) => {
       console.log(`✅ Order updated successfully: ${orderId}`);
     } else {
       // 🆕 Insert a new order if missing
-      const { error: insertError } = await supabase.from("orders").insert([
-        {
-          order_id: orderId,
-          total_amount: amount || 0,
-          payment_status: payment_status || "COMPLETED",
-          status: "Confirmed",
-          created_at: verifiedAt || new Date().toISOString(),
-        },
-      ]);
+      const { error: insertError } = await supabase.from("orders").insert([{
+        order_id: orderId,
+        total_amount: amount || 0,
+        payment_status: payment_status || "COMPLETED",
+        status: "Confirmed",
+        created_at: verifiedAt || new Date().toISOString(),
+      }]);
       if (insertError) throw insertError;
       console.log(`🆕 New order inserted: ${orderId}`);
     }
 
+    // ✉️ SEND ADMIN EMAIL
+    await sendAdminNewOrderEmail(orderId);
+
     res.json({ success: true, message: "Order saved/updated successfully" });
+
   } catch (err) {
     console.error("❌ /order-save error:", err.message);
     res.status(500).json({ success: false, message: err.message });
@@ -411,6 +413,63 @@ async function sendOrderEmail(to, name, orderId, amount) {
     console.log(`📧 Email sent to ${to}`);
   } catch (err) {
     console.error("❌ Email send failed:", err.message);
+  }
+}
+// ============================================================
+// 💌 ADMIN ALERT — New Order Notification
+// ============================================================
+async function sendAdminNewOrderEmail(orderId) {
+  try {
+    const { data: order, error } = await supabase
+      .from("orders")
+      .select("order_id, name, phone, city, state, total_amount, status, created_at")
+      .eq("order_id", orderId)
+      .maybeSingle();
+
+    if (error || !order) {
+      console.warn("⚠️ Admin email skipped: Order not found");
+      return;
+    }
+
+    if (!process.env.PERLYN_EMAIL || !process.env.PERLYN_APP_PASSWORD) {
+      console.warn("⚠️ Email credentials missing — cannot send admin alert");
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.PERLYN_EMAIL,
+        pass: process.env.PERLYN_APP_PASSWORD,
+      },
+    });
+
+    const subject = `📦 New Order Received — ${order.order_id}`;
+    const html = `
+      <div style="font-family:'Cormorant Garamond',serif;background:#fff8f4;padding:22px;border-radius:12px;color:#4b3b32">
+        <h2 style="color:#b98474;">New Order Received!</h2>
+        <p><b>Order ID:</b> ${order.order_id}</p>
+        <p><b>Customer:</b> ${order.name || "N/A"}</p>
+        <p><b>Phone:</b> ${order.phone || "N/A"}</p>
+        <p><b>City:</b> ${order.city || "-"}, <b>State:</b> ${order.state || "-"}</p>
+        <p><b>Total Amount:</b> ₹${order.total_amount || 0}</p>
+        <p><b>Status:</b> ${order.status || "Pending"}</p>
+        <p><b>Order Date:</b> ${new Date(order.created_at).toLocaleString("en-IN")}</p>
+        <hr style="border:0;border-top:1px solid #e3d4cb;margin:14px 0">
+        <p style="font-size:14px;color:#b98474;">Login to the Admin Panel to view full details.</p>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"Perlyn Beauty" <${process.env.PERLYN_EMAIL}>`,
+      to: "perlynbeauty@gmail.com", // You can add more admin emails comma-separated
+      subject,
+      html,
+    });
+
+    console.log(`📧 Admin alert sent for order: ${order.order_id}`);
+  } catch (err) {
+    console.error("❌ Failed to send admin order email:", err.message);
   }
 }
 
