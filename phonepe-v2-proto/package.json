@@ -1,7 +1,7 @@
 {
   "name": "phonepe-v2-proto",
   "version": "1.0.0",
-  "description": "Perlyn Beauty Payment Gateway with PhonePe V2 and Supabase Rewards Integration",
+  "description": "Perlyn Beauty Payment Gateway with PhonePe V2 + Supabase Rewards + Resend Email Integration",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "dotenv": "^16.4.5",
     "express": "^5.1.0",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^6.9.15"
+    "resend": "^3.1.0"
   },
   "engines": {
     "node": ">=22.0.0"
