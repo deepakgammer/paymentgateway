@@ -16,6 +16,14 @@ const resend = new Resend(process.env.RESEND_KEY);
 const app = express();
 
 app.use(cors());
+// ✅ Allow HTML pages (like product.html, cart.html) to call backend freely
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  next();
+});
+
 app.use(express.json());
 app.use(express.static("public"));
 
@@ -109,7 +117,8 @@ async function getAuthToken() {
   const type = data?.token_type || "Bearer";
   cachedTokenObj = { token, type };
 
-  tokenExpiryTs = now + 14 * 60 * 1000; // cache 14 min
+  tokenExpiryTs = now + 29 * 60 * 1000; // cache token for 29 minutes
+ // cache 14 min
   console.log("✅ Auth Token fetched successfully");
   return cachedTokenObj;
 }
@@ -501,6 +510,12 @@ app.post("/phonepe/webhook", (req, res) => {
 // ============================================================
 app.get("/", (req, res) => {
   res.send("💄 Perlyn Beauty Payment Gateway + Rewards is running successfully!");
+});
+// ============================================================
+// 🫀 KEEP-ALIVE PING — stops Render cold start delay
+// ============================================================
+app.get("/ping", (req, res) => {
+  res.status(200).send("pong");
 });
 
 // ============================================================
